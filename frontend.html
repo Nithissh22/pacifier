@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YourPacifier - Hydration Checker</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #f2f6fc; padding: 20px; }
+        .container { max-width: 500px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); margin: auto; }
+        input, button { width: 100%; padding: 10px; margin-top: 10px; border-radius: 5px; border: 1px solid #ccc; }
+        button { border: none; background-color: #007bff; color: white; font-size: 16px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        table { width: 100%; margin-top: 10px; border-collapse: collapse; }
+        th, td { padding: 8px; border: 1px solid #ddd; }
+        th { background: #007bff; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>YourPacifier - Hydration Checker</h2>
+        
+        <label for="humidity">Humidity (%):</label>
+        <input type="number" id="humidity" placeholder="Enter humidity" required>
+
+        <label for="weight">Weight (kg):</label>
+        <input type="number" id="weight" placeholder="Enter weight" required>
+        
+        <label for="age">Age (Months):</label>
+        <input type="number" id="age" placeholder="Enter age in months" required>
+
+        <button onclick="checkHydration()">Check Hydration Status</button>
+        <button onclick="resetFields()">Reset</button>
+        <button onclick="downloadHistory()">Download History</button>
+        
+        <p id="error"></p>
+        <p id="result"></p>
+        <p id="advice"></p>
+        <p id="timestamp"></p>
+
+        <h3>Past Hydration Records</h3>
+        <table id="historyTable">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Humidity (%)</th>
+                    <th>Weight (kg)</th>
+                    <th>Age (Months)</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+        </table>
+        
+        <h3>Hydration Trends</h3>
+        <canvas id="hydrationChart"></canvas>
+    </div>
+
+    <script>
+        let hydrationChart;
+
+        function checkHydration() {
+            let humidity = document.getElementById("humidity").value.trim();
+            let weight = document.getElementById("weight").value.trim();
+            let age = document.getElementById("age").value.trim();
+
+            if (!humidity || !weight || !age) {
+                document.getElementById("error").innerText = "⚠️ Please enter humidity, weight, and age!";
+                return;
+            }
+
+            fetch("http://127.0.0.1:5000/predict", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ humidity: parseFloat(humidity), weight: parseFloat(weight), age: parseInt(age) })
+            })
+            .then(response => response.json())
+            .then(data => {
+                let timeNow = new Date().toLocaleString();
+                document.getElementById("result").innerText = "Hydration Status: " + data.hydration_status;
+                document.getElementById("advice").innerText = "💡 Advice: " + data.advice;
+                document.getElementById("timestamp").innerText = "Checked on: " + timeNow;
+                
+                fetchHydrationData(); // Refresh chart and table instantly
+            })
+            .catch(() => {
+                document.getElementById("result").innerText = "❌ Error fetching result. Check server.";
+            });
+        }
+
+        function resetFields() {
+            document.getElementById("humidity").value = "";
+            document.getElementById("weight").value = "";
+            document.getElementById("age").value = "";
+            document.getElementById("result").innerText = "";
+            document.getElementById("advice").innerText = "";
+            document.getElementById("error").innerText = "";
+            document.getElementById("timestamp").innerText = "";
+        }
+
+        function fetchHydrationData() {
+            fetch("http://127.0.0.1:5000/hydration-data")
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) return;
+
+                    const historyBody = document.getElementById("historyBody");
+                    historyBody.innerHTML = "";
+
+                    const timestamps = [];
+                    const humidityValues = [];
+                    const weightValues = [];
+
+                    data.forEach(entry => {
+                        timestamps.push(entry.Timestamp);
+                        humidityValues.push(entry.Humidity);
+                        weightValues.push(entry.Weight);
+
+                        const newRow = document.createElement("tr");
+                        newRow.innerHTML = `
+                            <td>${entry.Timestamp}</td>
+                            <td>${entry.Humidity}%</td>
+                            <td>${entry.Weight} kg</td>
+                            <td>${entry.Age} months</td>
+                            <td>${entry.Hydration_Status}</td>
+                        `;
+                        historyBody.appendChild(newRow);
+                    });
+
+                    updateChart(timestamps, humidityValues, weightValues);
+                })
+                .catch(console.error);
+        }
+
+        function updateChart(labels, humidity, weight) {
+            const ctx = document.getElementById("hydrationChart").getContext("2d");
+            if (hydrationChart) hydrationChart.destroy();
+            hydrationChart = new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: "Humidity (%)",
+                            data: humidity,
+                            borderColor: "blue",
+                            backgroundColor: "rgba(0, 0, 255, 0.1)",
+                            fill: true
+                        },
+                        {
+                            label: "Weight (kg)",
+                            data: weight,
+                            borderColor: "green",
+                            backgroundColor: "rgba(0, 128, 0, 0.1)",
+                            fill: true
+                        }
+                    ]
+                },
+                options: { responsive: true }
+            });
+        }
+
+        function downloadHistory() {
+            let csvContent = "Time,Humidity (%),Weight (kg),Age (Months),Status\n";
+            document.querySelectorAll("#historyBody tr").forEach(row => {
+                csvContent += Array.from(row.children).map(cell => cell.innerText).join(",") + "\n";
+            });
+            
+            const blob = new Blob([csvContent], { type: "text/csv" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "hydration_history.csv";
+            link.click();
+        }
+
+        document.addEventListener("DOMContentLoaded", fetchHydrationData);
+    </script>
+</body>
+</html>
